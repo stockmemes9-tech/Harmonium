@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lid Harmonium</title>
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#fbf4e6; --fg:#3a2412; --card:#fffaf0; --muted:#8a6f55; --accent:#b4531f;
+  --key:#fffdf6; --keyact:#f2a65a; --line:#e3d2b4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1d1209; --fg:#f6e7cf; --card:#2a1b0f; --muted:#b99b79; --accent:#f08a43;
+    --key:#3b2918; --keyact:#c76a22; --line:#4a3420;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1d1209; --fg:#f6e7cf; --card:#2a1b0f; --muted:#b99b79; --accent:#f08a43;
+  --key:#3b2918; --keyact:#c76a22; --line:#4a3420;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:Georgia,"Times New Roman",serif;min-height:100vh}
+main{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:2rem;margin:0 0 4px;letter-spacing:.5px}
+p.sub{margin:0 0 20px;color:var(--muted);font-family:system-ui,sans-serif;font-size:.95rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;font-family:system-ui,sans-serif}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:9px 14px;border-radius:10px}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;font-size:1.05rem;padding:12px 22px}
+button:hover{filter:brightness(1.07)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.status{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.pill{padding:4px 10px;border-radius:999px;background:var(--bg);border:1px solid var(--line);font-size:.85rem}
+.meter{height:12px;border-radius:6px;background:var(--bg);border:1px solid var(--line);overflow:hidden;flex:1;min-width:140px}
+.meter>div{height:100%;width:0;background:var(--accent);transition:width .06s}
+#note{font-size:2.6rem;font-family:Georgia,serif;min-width:140px}
+#note small{font-size:1rem;color:var(--muted);margin-left:6px}
+video{width:120px;height:90px;border-radius:8px;background:#000;transform:scaleX(-1);object-fit:cover}
+.keys{display:flex;gap:4px;height:150px;touch-action:none;user-select:none}
+.key{flex:1;background:var(--key);border:1px solid var(--line);border-radius:0 0 8px 8px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:8px;font-size:.78rem;color:var(--muted);cursor:pointer}
+.key.on{background:var(--keyact);color:#fff}
+input[type=range]{width:100%;accent-color:var(--accent)}
+label{font-size:.9rem;display:flex;gap:6px;align-items:center}
+.hint{font-size:.85rem;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+  <h1>🪗 Lid Harmonium</h1>
+  <p class="sub">Move your laptop lid and the harmonium plays. Tilt up to climb the scale, tilt down to descend. Move faster for louder.</p>
+
+  <div class="card">
+    <div class="row">
+      <button class="primary" id="start">Start (enable sound &amp; detection)</button>
+      <button id="calib" disabled>Reset position</button>
+      <button id="flip" disabled>Flip direction</button>
+      <label><input type="checkbox" id="drone"> Sa-Pa drone</label>
+    </div>
+    <p class="hint" id="msg" style="margin:10px 0 0">Press Start. The browser will ask for camera permission (used only to sense the lid tilting; nothing is recorded or uploaded).</p>
+  </div>
+
+  <div class="card">
+    <div class="status">
+      <div id="note">–<small></small></div>
+      <span class="pill">Source: <b id="src">not started</b></span>
+      <video id="cam" playsinline muted style="display:none"></video>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <span class="hint">Movement</span>
+      <div class="meter"><div id="lvl"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="keys" id="keys"></div>
+    <p class="hint" style="margin:12px 0 6px">Manual control (also works if no sensor or camera is available): tap or drag across the keys, use ← → keys, or this slider.</p>
+    <input type="range" id="slider" min="0" max="14" step="0.01" value="7">
+  </div>
+
+  <p class="hint">Tip: sit in front of the laptop with a normally lit, steady background (a wall or room behind you works well). Walking around behind you can confuse the camera detection.</p>
+</main>
+
+<script>
+(function(){
+  const NAMES = ['Sa','Re','Ga','Ma','Pa','Dha','Ni','Sa','Re','Ga','Ma','Pa','Dha','Ni','Sa'];
+  const SEMI  = [0,2,4,5,7,9,11,12,14,16,17,19,21,23,24];
+  const BASE  = 261.63; // C4
+  const N = SEMI.length;
+  const $ = id => document.getElementById(id);
+
+  // ---------- keyboard UI ----------
+  const keysEl = $('keys');
+  const keyEls = NAMES.map((n,i)=>{
+    const d = document.createElement('div');
+    d.className='key'; d.textContent=n;
+    keysEl.appendChild(d); return d;
+  });
+
+  // ---------- audio ----------
+  let ctx, master, voiceGain, filter, oscs=[], droneNodes=[], started=false;
+  function freqOf(i){ return BASE * Math.pow(2, SEMI[i]/12); }
+
+  function buildAudio(){
+    ctx = new (window.AudioContext||window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0.55;
+    const comp = ctx.createDynamicsCompressor();
+    master.connect(comp); comp.connect(ctx.destination);
+
+    filter = ctx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=1700; filter.Q.value=0.7;
+    // body resonance, gives the wooden "box" colour
+    const body = ctx.createBiquadFilter(); body.type='peaking'; body.frequency.value=900; body.gain.value=5; body.Q.value=0.9;
+    voiceGain = ctx.createGain(); voiceGain.gain.value = 0;
+    voiceGain.connect(filter); filter.connect(body); body.connect(master);
+
+    // reeds: 2 detuned saws + octave-down square (like a harmonium reed bank)
+    const defs = [
+      {type:'sawtooth', mult:1,   detune:-5, g:0.35},
+      {type:'sawtooth', mult:1,   detune:+6, g:0.35},
+      {type:'square',   mult:0.5, detune:0,  g:0.18},
+      {type:'sawtooth', mult:2,   detune:+3, g:0.10}
+    ];
+    defs.forEach(d=>{
+      const o = ctx.createOscillator(); o.type=d.type; o.detune.value=d.detune;
+      o.frequency.value = freqOf(7)*d.mult;
+      const g = ctx.createGain(); g.gain.value = d.g;
+      o.connect(g); g.connect(voiceGain); o.start();
+      oscs.push({o, mult:d.mult});
+    });
+    // gentle bellows flutter
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 5.2;
+    const lg = ctx.createGain(); lg.gain.value = 0.03;
+    lfo.connect(lg); lg.connect(voiceGain.gain); lfo.start();
+  }
+
+  function setNote(i){
+    if(!ctx) return;
+    const f = freqOf(i), t = ctx.currentTime;
+    oscs.forEach(x=> x.o.frequency.setTargetAtTime(f*x.mult, t, 0.012));
+  }
+  function setLoud(v){
+    if(!ctx) return;
+    voiceGain.gain.setTargetAtTime(Math.max(0,Math.min(1,v))*0.7, ctx.currentTime, 0.05);
+    filter.frequency.setTargetAtTime(1100 + v*1800, ctx.currentTime, 0.05);
+  }
+  function toggleDrone(on){
+    if(!ctx) return;
+    if(on && !droneNodes.length){
+      const dg = ctx.createGain(); dg.gain.value = 0; dg.connect(master);
+      dg.gain.setTargetAtTime(0.07, ctx.currentTime, 0.3);
+      [BASE/2, BASE*0.75].forEach(f=>{
+        [-4,4].forEach(c=>{
+          const o = ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=f; o.detune.value=c;
+          const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=700;
+          o.connect(lp); lp.connect(dg); o.start(); droneNodes.push(o);
+        });
+      });
+      droneNodes.gain = dg;
+    } else if(!on && droneNodes.length){
+      const dg = droneNodes.gain;
+      dg.gain.setTargetAtTime(0, ctx.currentTime, 0.2);
+      const old = droneNodes.slice(); droneNodes = [];
+      setTimeout(()=>old.forEach(o=>{try{o.stop()}catch(e){}}), 1200);
+    }
+  }
+
+  // ---------- state ----------
+  let pos = 7, curIdx = -1, level = 0, dir = 1, source = 'none';
+  let manualHold = false;
+
+  function show(idx){
+    keyEls.forEach((k,i)=>k.classList.toggle('on', i===idx));
+    $('note').innerHTML = NAMES[idx] + '<small>' + (idx>=7 ? (idx===14?'(high)':'(upper)') : '(lower)') + '</small>';
+  }
+
+  function applyMovement(delta, energy){
+    // delta: change in position (in key steps); energy: 0..1+
+    pos = Math.max(0, Math.min(N-1, pos + delta*dir));
+    $('slider').value = pos;
+    level = Math.max(level*0.88, Math.min(1, energy));
+  }
+
+  // main render/audio loop
+  function loop(){
+    const idx = Math.round(pos);
+    if(idx !== curIdx){ curIdx = idx; show(idx); setNote(idx); }
+    if(!manualHold){ level *= 0.93; }
+    const audible = level > 0.07 ? level : 0;
+    setLoud(audible);
+    $('lvl').style.width = Math.min(100, level*100) + '%';
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- source 1: motion sensor ----------
+  let lastBeta = null, lastT = 0, gotOrientation = false;
+  function onOrient(e){
+    if(e.beta == null) return;
+    gotOrientation = true;
+    const now = performance.now();
+    if(lastBeta !== null){
+      let d = e.beta - lastBeta;
+      if(Math.abs(d) < 0.25) d = 0;       // ignore jitter
+      if(d !== 0){
+        const dt = Math.max(1, now - lastT);
+        applyMovement(d*0.35, Math.min(1, Math.abs(d)/dt*60));
+        if(source === 'camera'){ $('src').textContent='Webcam + motion sensor'; }
+      }
+    }
+    lastBeta = e.beta; lastT = now;
+  }
+
+  // ---------- source 2: camera ----------
+  let stream = null, camTimer = null;
+  const cv = document.createElement('canvas'); cv.width=40; cv.height=30;
+  const cx = cv.getContext('2d', {willReadFrequently:true});
+  let prevRows = null, prevGray = null;
+
+  async function startCamera(){
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'}, audio:false});
+    const v = $('cam'); v.srcObject = stream; v.style.display='block';
+    await v.play();
+    source = 'camera'; $('src').textContent = 'Webcam (lid tilt)';
+    camTimer = setInterval(analyse, 40);
+  }
+  function stopCamera(){
+    if(camTimer){ clearInterval(camTimer); camTimer=null; }
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    $('cam').style.display='none';
+  }
+  function analyse(){
+    const v = $('cam'); if(v.readyState < 2) return;
+    cx.drawImage(v,0,0,40,30);
+    const d = cx.getImageData(0,0,40,30).data;
+    const W=40,H=30, gray = new Float32Array(W*H), rows = new Float32Array(H);
+    for(let y=0;y<H;y++){ let s=0;
+      for(let x=0;x<W;x++){ const i=(y*W+x)*4; const g=0.3*d[i]+0.59*d[i+1]+0.11*d[i+2]; gray[y*W+x]=g; s+=g; }
+      rows[y]=s/W;
+    }
+    if(prevRows){
+      // global change
+      let diff=0; for(let i=0;i<gray.length;i++) diff+=Math.abs(gray[i]-prevGray[i]);
+      diff/=gray.length;
+      // best vertical shift between row profiles
+      let best=0, bestErr=Infinity, zeroErr=0;
+      for(let s=-4;s<=4;s++){
+        let err=0,c=0;
+        for(let y=4;y<H-4;y++){ err+=Math.abs(rows[y]-prevRows[y+s]); c++; }
+        err/=c; if(s===0) zeroErr=err;
+        if(err<bestErr){bestErr=err;best=s;}
+      }
+      if(zeroErr - bestErr < 0.6) best = 0;      // not a clear shift
+      if(diff < 2.2) best = 0;                   // static scene, noise only
+      // image content moves opposite to camera tilt
+      const move = -best;
+      if(move !== 0 || diff > 6){
+        applyMovement(move*0.45, Math.abs(move)*0.4 + diff/35);
+      }
+    }
+    prevRows = rows; prevGray = gray;
+  }
+
+  // ---------- manual input ----------
+  function manualSet(v, loud){
+    const old = pos; pos = Math.max(0, Math.min(N-1, v)); $('slider').value = pos;
+    level = Math.max(level, loud);
+  }
+  $('slider').addEventListener('input', e=>{ ensureAudio(); manualSet(parseFloat(e.target.value), 0.7); });
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowRight'||e.key==='ArrowUp'){ ensureAudio(); manualSet(Math.round(pos)+1, 0.8); e.preventDefault(); }
+    if(e.key==='ArrowLeft'||e.key==='ArrowDown'){ ensureAudio(); manualSet(Math.round(pos)-1, 0.8); e.preventDefault(); }
+  });
+  let dragging=false;
+  function keyFromEvent(e){
+    const r = keysEl.getBoundingClientRect();
+    const x = (e.touches? e.touches[0].clientX : e.clientX) - r.left;
+    return Math.max(0, Math.min(N-1, Math.floor(x/r.width*N)));
+  }
+  keysEl.addEventListener('pointerdown', e=>{ ensureAudio(); dragging=true; manualHold=true; manualSet(keyFromEvent(e), 0.9); level=0.9; });
+  window.addEventListener('pointermove', e=>{ if(dragging){ manualSet(keyFromEvent(e), 0.9); level=0.9; }});
+  window.addEventListener('pointerup', ()=>{ dragging=false; manualHold=false; });
+
+  function ensureAudio(){
+    if(!ctx){ buildAudio(); if(!started){ started=true; requestAnimationFrame(loop); } }
+    if(ctx.state==='suspended') ctx.resume();
+  }
+
+  // ---------- start ----------
+  $('start').addEventListener('click', async ()=>{
+    ensureAudio();
+    $('calib').disabled = false; $('flip').disabled = false;
+    $('start').textContent = 'Running…';
+    $('msg').textContent = 'Listening for lid movement…';
+
+    // try motion sensor first
+    try{
+      if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+        await DeviceOrientationEvent.requestPermission();
+      }
+    }catch(e){}
+    window.addEventListener('deviceorientation', onOrient);
+    await new Promise(r=>setTimeout(r,600));
+    // always start the webcam too: many laptop sensors sit in the base, not the lid
+    try{
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('no camera API');
+      await startCamera();
+      if(gotOrientation) $('src').textContent='Webcam + motion sensor';
+      $('msg').textContent = 'Webcam active. Slowly tilt your lid up and down. Sound plays while it moves. If the pitch goes the wrong way, press Flip direction.';
+    }catch(err){
+      if(gotOrientation){
+        source='sensor'; $('src').textContent='Motion sensor';
+        $('msg').textContent = 'Camera unavailable, using the motion sensor. Tilt the lid to play. If nothing happens, press Flip direction.';
+      } else {
+        source='manual'; $('src').textContent='Manual only';
+        $('msg').textContent = 'Camera was blocked or unavailable (' + (err && err.name || 'error') + '). Allow camera access in the address bar lock icon and press Start again. You can still play with the keys, slider or arrow keys.';
+      }
+    }
+  });
+  $('calib').addEventListener('click', ()=>{ pos=7; $('slider').value=7; lastBeta=null; prevRows=null; });
+  $('flip').addEventListener('click', ()=>{ dir*=-1; $('msg').textContent = 'Direction flipped.'; });
+  $('drone').addEventListener('change', e=>{ ensureAudio(); toggleDrone(e.target.checked); });
+
+  show(7);
+})();
+</script>
+</body>
+</html>
